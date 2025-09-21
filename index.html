@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CropCare - Plant Disease Detector</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Animations */
+    @keyframes fadeIn { from {opacity:0; transform:translateY(20px);} to {opacity:1; transform:translateY(0);} }
+    @keyframes shake { 0%,100%{transform:translateX(0);} 25%{transform:translateX(-5px);} 75%{transform:translateX(5px);} }
+    .animate-fade-in { animation: fadeIn 0.6s ease-in-out; }
+    .animate-shake { animation: shake 0.5s ease-in-out; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb { background: #10b981; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #059669; }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center p-4">
+
+  <div class="max-w-2xl w-full bg-white/80 backdrop-blur-lg shadow-2xl rounded-3xl p-6 animate-fade-in">
+    <h1 class="text-4xl font-bold text-center text-emerald-600 mb-4">🌱 CropCare</h1>
+    <p class="text-center text-gray-600 mb-6">AI-powered plant disease detection + prices (English & Telugu voice)</p>
+
+    <!-- Camera Preview -->
+    <div class="text-center mb-4">
+      <video id="camera" autoplay playsinline class="mx-auto hidden rounded-xl shadow-lg max-h-60"></video>
+      <canvas id="canvas" class="hidden"></canvas>
+    </div>
+
+    <!-- Buttons -->
+    <div class="flex justify-center gap-4 mb-6">
+      <button id="startCamera" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg">📷 Open Camera</button>
+      <button id="capture" class="px-4 py-2 bg-teal-500 hover:bg-teal-600 text-white rounded-lg hidden">📸 Capture</button>
+      <input type="file" id="upload" accept="image/*" class="hidden">
+      <label for="upload" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg cursor-pointer">📂 Upload</label>
+    </div>
+
+    <!-- Preview -->
+    <div id="previewContainer" class="text-center mb-6 hidden">
+      <img id="preview" alt="Plant" class="mx-auto max-h-60 rounded-xl shadow-lg mb-4"/>
+      <button id="analyzeNew" class="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg">🔄 Analyze New Image</button>
+    </div>
+
+    <!-- Results -->
+    <div id="results" class="hidden animate-fade-in">
+      <h2 class="text-xl font-bold text-emerald-700 mb-3">Detection Result</h2>
+      <p id="disease" class="font-semibold text-gray-800"></p>
+      <p id="confidence" class="text-sm text-gray-500 mb-3"></p>
+
+      <div class="bg-blue-50 rounded-xl p-4 mb-3">
+        <h3 class="font-semibold text-blue-900 mb-2">Pesticides (English)</h3>
+        <ul id="pesticidesEn" class="list-disc pl-5 text-blue-800"></ul>
+        <button id="speakEn" class="mt-2 px-3 py-1 bg-blue-500 text-white rounded-lg">🔊 Speak English</button>
+      </div>
+
+      <div class="bg-green-50 rounded-xl p-4">
+        <h3 class="font-semibold text-green-900 mb-2">సిఫార్సు చేసిన మందులు (తెలుగు)</h3>
+        <ul id="pesticidesTe" class="list-disc pl-5 text-green-800"></ul>
+        <button id="speakTe" class="mt-2 px-3 py-1 bg-green-500 text-white rounded-lg">🔊 వినండి</button>
+      </div>
+    </div>
+
+    <!-- Loading -->
+    <p id="loading" class="text-center text-gray-600 hidden">Analyzing image...</p>
+  </div>
+
+  <!-- Floating Chat Button -->
+  <button id="chatToggle" class="fixed bottom-6 right-6 bg-emerald-600 hover:bg-emerald-700 text-white p-4 rounded-full shadow-xl text-2xl">💬</button>
+
+  <!-- Chat Window -->
+  <div id="chatWindow" class="fixed bottom-20 right-6 w-80 bg-white shadow-2xl rounded-2xl hidden flex flex-col">
+    <div class="bg-emerald-600 text-white p-3 rounded-t-2xl font-bold">🌱 CropCare Assistant</div>
+    <div id="chatMessages" class="flex-1 p-3 overflow-y-auto text-sm space-y-2"></div>
+    <div class="flex p-2 border-t">
+      <input id="chatInput" type="text" placeholder="Ask me anything..." class="flex-1 p-2 border rounded-lg text-sm"/>
+      <button id="sendChat" class="ml-2 px-3 bg-emerald-500 text-white rounded-lg">➤</button>
+    </div>
+  </div>
+
+<script>
+const camera = document.getElementById("camera");
+const canvas = document.getElementById("canvas");
+const previewContainer = document.getElementById("previewContainer");
+const preview = document.getElementById("preview");
+const resultsDiv = document.getElementById("results");
+const diseaseEl = document.getElementById("disease");
+const confidenceEl = document.getElementById("confidence");
+const pesticidesEnEl = document.getElementById("pesticidesEn");
+const pesticidesTeEl = document.getElementById("pesticidesTe");
+const loadingEl = document.getElementById("loading");
+
+// Disease database (sample)
+const diseaseDatabase = {
+  "Tomato___Late_blight": {
+    en: ["Metalaxyl", "Mancozeb", "Copper Oxychloride"],
+    te: ["మెటాలాక్సిల్", "మాంకోజెబ్", "కాపర్ ఆక్సీక్లోరైడ్"]
+  },
+  "Potato___Early_blight": {
+    en: ["Azoxystrobin", "Difenoconazole", "Mancozeb"],
+    te: ["అజోక్సిస్ట్రోబిన్", "డైఫెనోకోనజోల్", "మాంకోజెబ్"]
+  },
+  "Banana___Sigatoka": {
+    en: ["Mancozeb", "Thiophanate-methyl", "Propiconazole"],
+    te: ["మాంకోజెబ్", "థియోఫానేట్-మిథైల్", "ప్రోపికోనాజోల్"]
+  }
+};
+
+// Price Database (40+ vegetables and pesticides)
+const priceDatabase = {
+  vegetables: {
+    Tomato: "₹28 / kg", Potato: "₹20 / kg", Onion: "₹35 / kg", Brinjal: "₹30 / kg",
+    Cabbage: "₹22 / kg", Cauliflower: "₹25 / kg", Carrot: "₹40 / kg", Cucumber: "₹24 / kg",
+    Spinach: "₹18 / bunch", Okra: "₹32 / kg", Beans: "₹50 / kg", GreenChilli: "₹60 / kg",
+    Capsicum: "₹70 / kg", BitterGourd: "₹45 / kg", BottleGourd: "₹25 / kg", Pumpkin: "₹18 / kg",
+    Radish: "₹28 / kg", Coriander: "₹15 / bunch", Ginger: "₹90 / kg", Garlic: "₹120 / kg",
+    Peas: "₹55 / kg", SweetPotato: "₹35 / kg", Drumstick: "₹40 / kg", RidgeGourd: "₹30 / kg",
+    Turnip: "₹25 / kg", Fenugreek: "₹20 / bunch", Lettuce: "₹60 / kg", Beetroot: "₹35 / kg",
+    MustardGreens: "₹25 / bunch", Broccoli: "₹80 / kg", Zucchini: "₹70 / kg", Celery: "₹50 / bunch",
+    Mint: "₹15 / bunch", CurryLeaves: "₹10 / bunch", Colocasia: "₹40 / kg", SnakeGourd: "₹35 / kg",
+    AshGourd: "₹28 / kg", ClusterBeans: "₹45 / kg", Cowpea: "₹40 / kg", Tinda: "₹30 / kg"
+  },
+  pesticides: {
+    Mancozeb: "₹250 / 500g", CopperOxychloride: "₹300 / 500g", Metalaxyl: "₹350 / 250ml",
+    Azoxystrobin: "₹450 / 100ml", Difenoconazole: "₹500 / 100ml", Propiconazole: "₹420 / 100ml",
+    Carbendazim: "₹200 / 250g", ThiophanateMethyl: "₹280 / 250g", Chlorpyrifos: "₹350 / litre",
+    Imidacloprid: "₹150 / 100ml", Glyphosate: "₹600 / litre", Atrazine: "₹250 / kg",
+    Tricyclazole: "₹400 / 100g", Hexaconazole: "₹320 / 100ml", Pendimethalin: "₹550 / litre",
+    Profenofos: "₹450 / litre", Acephate: "₹300 / 500g", SulphurDust: "₹120 / kg",
+    NeemOil: "₹200 / litre", Spinosad: "₹650 / litre", Monocrotophos: "₹380 / litre",
+    Dimethoate: "₹280 / litre", Malathion: "₹220 / litre", Fipronil: "₹480 / 250ml",
+    Cypermethrin: "₹150 / 100ml", LambdaCyhalothrin: "₹350 / 100ml", Buprofezin: "₹400 / 250ml",
+    Quinalphos: "₹300 / litre", Diafenthiuron: "₹500 / 100g", Tebuconazole: "₹420 / 100ml",
+    Chlorothalonil: "₹280 / 250g", Flubendiamide: "₹450 / 100ml", Indoxacarb: "₹500 / 100ml",
+    Abamectin: "₹600 / 250ml", Carbosulfan: "₹380 / litre", Thiacloprid: "₹480 / 100ml",
+    Pyriproxyfen: "₹320 / 100ml", Emamectin: "₹650 / 100g", Oxadiargyl: "₹250 / 250g",
+    Pretilachlor: "₹400 / litre", Paraquat: "₹300 / litre"
+  }
+};
+
+// Camera
+document.getElementById("startCamera").addEventListener("click", async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    camera.srcObject = stream;
+    camera.classList.remove("hidden");
+    document.getElementById("capture").classList.remove("hidden");
+  } catch (err) {
+    alert("Camera access denied: " + err.message);
+  }
+});
+
+// Capture
+document.getElementById("capture").addEventListener("click", () => {
+  canvas.width = camera.videoWidth;
+  canvas.height = camera.videoHeight;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(camera, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL("image/png");
+  showPreview(dataUrl);
+});
+
+// Upload
+document.getElementById("upload").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => showPreview(reader.result);
+  reader.readAsDataURL(file);
+});
+
+function showPreview(src) {
+  preview.src = src;
+  previewContainer.classList.remove("hidden");
+  analyze(src);
+}
+
+// Fake analyze
+function analyze(img) {
+  loadingEl.classList.remove("hidden");
+  resultsDiv.classList.add("hidden");
+  setTimeout(() => {
+    const keys = Object.keys(diseaseDatabase);
+    const random = keys[Math.floor(Math.random()*keys.length)];
+    const data = diseaseDatabase[random];
+    const confidence = Math.floor(Math.random()*30)+70;
+
+    diseaseEl.textContent = random.replace(/_/g, " ");
+    confidenceEl.textContent = "Confidence: " + confidence + "%";
+    pesticidesEnEl.innerHTML = data.en.map(p => `<li>${p}</li>`).join("");
+    pesticidesTeEl.innerHTML = data.te.map(p => `<li>${p}</li>`).join("");
+
+    loadingEl.classList.add("hidden");
+    resultsDiv.classList.remove("hidden");
+
+    document.getElementById("speakEn").onclick = () => {
+      speak(`Detected disease: ${random.replace(/_/g," ")}. Recommended pesticides are ${data.en.join(", ")}`, "en-US");
+    };
+    document.getElementById("speakTe").onclick = () => {
+      speak(`గుర్తించిన వ్యాధి: ${random.replace(/_/g," ")}. సిఫార్సు చేసిన మందులు: ${data.te.join(", ")}`, "te-IN");
+    };
+  }, 1500);
+}
+
+function speak(text, lang) {
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = lang;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utter);
+}
+
+// Reset
+document.getElementById("analyzeNew").addEventListener("click", () => {
+  previewContainer.classList.add("hidden");
+  resultsDiv.classList.add("hidden");
+});
+
+// Chat Assistant
+const chatToggle = document.getElementById("chatToggle");
+const chatWindow = document.getElementById("chatWindow");
+const chatMessages = document.getElementById("chatMessages");
+const chatInput = document.getElementById("chatInput");
+const sendChat = document.getElementById("sendChat");
+
+chatToggle.addEventListener("click", () => {
+  chatWindow.classList.toggle("hidden");
+});
+
+sendChat.addEventListener("click", sendMessage);
+chatInput.addEventListener("keypress", (e) => {
+  if (e.key === "Enter") sendMessage();
+});
+
+function sendMessage() {
+  const text = chatInput.value.trim();
+  if (!text) return;
+  addMessage("👨‍🌾 You", text, "text-gray-800");
+  chatInput.value = "";
+
+  setTimeout(() => {
+    let reply = "I'm here to help! 🌱";
+
+    if (text.toLowerCase().includes("tomato")) {
+      reply = "Tomatoes are prone to blight. Use Mancozeb or Copper Oxychloride.";
+    } else if (text.toLowerCase().includes("banana")) {
+      reply = "Banana Sigatoka can be controlled with Propiconazole.";
+    } else if (text.toLowerCase().includes("hello")) {
+      reply = "Hello farmer 👋! How can I help with your crops today?";
+    }
+
+    // Price Query
+    const words = text.toLowerCase().split(" ");
+    for (let veg in priceDatabase.vegetables) {
+      if (words.includes(veg.toLowerCase())) {
+        reply = `${veg} current market price: ${priceDatabase.vegetables[veg]}`;
+      }
+    }
+    for (let pest in priceDatabase.pesticides) {
+      if (words.includes(pest.toLowerCase())) {
+        reply = `${pest} price: ${priceDatabase.pesticides[pest]}`;
+      }
+    }
+
+    addMessage("🤖 CropCare AI", reply, "text-green-700");
+  }, 1000);
+}
+
+function addMessage(sender, text, color) {
+  const msg = document.createElement("div");
+  msg.innerHTML = `<strong>${sender}:</strong> <span class="${color}">${text}</span>`;
+  chatMessages.appendChild(msg);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+</script>
+
+</body>
+</html>
